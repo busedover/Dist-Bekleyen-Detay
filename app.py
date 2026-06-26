@@ -94,26 +94,36 @@ if orders_file and catalog_file and stock_file and prices_file:
         df_merged['Kayıp (Karşılanamayan) NIV'] = (df_merged['Sipariş Miktarı'] - df_merged['Karşılanan Adet']) * df_merged['Fiyat']
         df_merged['Fill Rate %'] = (df_merged['Karşılanan Adet'] / df_merged['Sipariş Miktarı'] * 100).fillna(0)
 
-        # --- YENİ: FİLTRELEME ALANI ---
+        # --- YENİ: ARAMA ÖZELLİKLİ FİLTRELEME ALANI ---
         st.sidebar.markdown("---")
-        st.sidebar.header("🔍 Veri Filtreleme")
+        st.sidebar.header("🔍 Yazarak Arayın & Filtreleyin")
         
-        # 1. Müşteri Filtresi
-        musteri_listesi = ["Tümü"] + sorted(df_merged['Müşteri Adı'].dropna().unique().tolist())
-        secilen_musteri = st.sidebar.selectbox("Müşteri Seçin", musteri_listesi)
+        # 1. Arama Özellikli Müşteri Filtresi (Multiselect)
+        tum_musteriler = sorted(df_merged['Müşteri Adı'].dropna().unique().tolist())
+        secilen_musteriler = st.sidebar.multiselect(
+            "🏢 Müşteri Adı Yazın / Seçin", 
+            options=tum_musteriler,
+            placeholder="Müşteri ismi yazın..."
+        )
         
-        # 2. Barkod Filtresi
-        barkod_listesi = ["Tümü"] + sorted(df_merged['Barkod'].dropna().unique().tolist())
-        secilen_barkod = st.sidebar.selectbox("Barkod Seçin", barkod_listesi)
+        # 2. Arama Özellikli Barkod Filtresi (Multiselect)
+        tum_barkodlar = sorted(df_merged['Barkod'].dropna().unique().tolist())
+        secilen_barkodlar = st.sidebar.multiselect(
+            "🏷 Barkod Yazın / Seçin", 
+            options=tum_barkodlar,
+            placeholder="Barkod yazın..."
+        )
         
         # Filtreleri tabloya uygulama
         df_filtered = df_merged.copy()
         
-        if secilen_musteri != "Tümü":
-            df_filtered = df_filtered[df_filtered['Müşteri Adı'] == secilen_musteri]
+        # Eğer müşteri seçildiyse filtrele (boş bırakılırsa hepsi listelenir)
+        if len(secilen_musteriler) > 0:
+            df_filtered = df_filtered[df_filtered['Müşteri Adı'].isin(secilen_musteriler)]
             
-        if secilen_barkod != "Tümü":
-            df_filtered = df_filtered[df_filtered['Barkod'] == secilen_barkod]
+        # Eğer barkod seçildiyse filtrele (boş bırakılırsa hepsi listelenir)
+        if len(secilen_barkodlar) > 0:
+            df_filtered = df_filtered[df_filtered['Barkod'].isin(secilen_barkodlar)]
 
         # --- KPI Kartları (Filtrelenmiş Veriye Göre) ---
         total_requested_niv = df_filtered['Toplam Talep Edilen NIV'].sum()
