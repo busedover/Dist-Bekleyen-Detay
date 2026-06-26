@@ -48,84 +48,84 @@ if orders_file and catalog_file and stock_file and prices_file:
     prices_ok = fiyat_barkod_col in df_prices_raw.columns and fiyat_deger_col in df_prices_raw.columns
     
     if catalog_ok and stock_ok and orders_ok and prices_ok:
-        # --- VERİ TİPİ TEMİZLEME VE UYUMLAŞTIRMA (Kritik Aşama) ---
-        # Barkod kolonlarını string (yazı) formatına getiriyoruz ve boşlukları siliyoruz
+        # --- VERİ TEMİZLEME VE FORMAT STANDARTLAŞTIRMA ---
+        # 1. Sipariş Barkod Temizliği
         df_orders[siparis_barkod_col] = df_orders[siparis_barkod_col].astype(str).str.strip().str.split('.').str[0]
-        df_catalog[katalog_ean_col] = df_catalog[katalog_ean_col].astype(str).str.strip().str.split('.').str[0]
-        df_prices_raw[fiyat_barkod_col] = df_prices_raw[fiyat_barkod_col].astype(str).str.strip().str.split('.').str[0]
         
-        # Malzeme (Material) kolonlarını temizleme (Örn: başında sıfır olan sayıları eşitlemek için)
+        # 2. Katalog Temizliği (Material ve EAN)
         df_catalog[katalog_material_col] = df_catalog[katalog_material_col].astype(str).str.strip().str.lstrip('0')
-        df_stock[stok_material_col] = df_stock[stok_material_col].astype(str).str.strip().str.lstrip('0')
+        df_catalog[katalog_ean_col] = df_catalog[katalog_ean_col].astype(str).str.strip().str.split('.').str[0]
         
-        # Fiyat listesini temizleyelim ve "Barkod" - "Fiyat" olarak standartlaştıralım
+        # 3. Stok Temizliği (Material ve Net avail. sayısal dönüşümü)
+        df_stock[stok_material_col] = df_stock[stok_material_col].astype(str).str.strip().str.lstrip('0')
+        df_stock[stok_net_avail_col] = pd.to_numeric(df_stock[stok_net_avail_col], errors='coerce').fillna(0)
+        
+        # 4. Fiyat Listesi Temizliği
+        df_prices_raw[fiyat_barkod_col] = df_prices_raw[fiyat_barkod_col].astype(str).str.strip().str.split('.').str[0]
         df_prices = df_prices_raw[[fiyat_barkod_col, fiyat_deger_col]].dropna().drop_duplicates(subset=[fiyat_barkod_col])
         df_prices.rename(columns={fiyat_barkod_col: "Barkod", fiyat_deger_col: "Fiyat"}, inplace=True)
 
-        # 1. Stok dosyasında Malzeme bazında toplam 'Net avail.' miktarını hesapla
+        # --- ASIL CPD KÖPRÜ MANTIK ZİNCİRİ ---
+        # 1. Adım: Stok dosyasındaki malzemelerin toplam stoklarını gruplayarak alalım
         df_stock_grouped = df_stock.groupby(stok_material_col)[stok_net_avail_col].sum().reset_index()
         
-        # 2. Katalog dosyasından Material -> EAN (Barkod) eşleşmesini al
-        df_cat_clean = df_catalog[[katalog_material_col, katalog_ean_col]].dropna().drop_duplicates()
+        # 2. Adım: Katalogdan sadece Material ve EAN (Barkod) sütunlarını çekelim
+        df_cat_bridge = df_catalog[[katalog_material_col, katalog_ean_col]].dropna().drop_duplicates()
         
-        # 3. Kataloğu Stok ile birleştirerek Barkod bazlı stok durumunu elde et
-        df_barcode_stock = pd.merge(df_cat_clean, df_stock_grouped, on=katalog_material_col, how="inner")
+        # 3. Adım: Katalog köprüsüyle Stokları "Material" üzerinden birleştirelim
+        df_merged_stock = pd.merge(df_cat_bridge, df_stock_grouped, on=katalog_material_col, how="inner")
         
-        # Aynı barkoda sahip birden fazla malzeme kodu olma ihtimaline karşı barkod bazında stokları topla
-        df_final_stock = df_barcode_stock.groupby(katalog_ean_col)[stok_net_avail_col].sum().reset_index()
-        df_final_stock.rename(columns={katalog_ean_col: "Barkod"}, inplace=True)
+        # 4. Adım: Aynı barkoda (EAN Cod-UM) karşılık gelen tüm malzeme stoklarını TOPLAYALIM
+        df_barcode_stock_sum = df_merged_stock.groupby(katalog_ean_col)[stok_net_avail_col].sum().reset_index()
         
-        # 4. Sipariş dosyasına otomatik fiyatları eşleştirme
+        # Kolon ismini standartlaştırarak siparişe hazır hale getirelim
+        df_barcode_stock_sum.rename(columns={katalog_ean_col: "Barkod"}, inplace=True)
+
+        # --- SİPARİŞ BİRLEŞTİRME VE FİYATLANDIRMA ---
+        # 5. Adım: Siparişe Fiyatları Barkod üzerinden bağlayalım
         if "Fiyat" in df_orders.columns:
             df_orders = df_orders.drop(columns=["Fiyat"])
         df_orders_with_price = pd.merge(df_orders, df_prices, on="Barkod", how="left")
         
-        # 5. Sipariş verilerini Barkod bazlı son stok durumu ile birleştir
-        df_merged = pd.merge(df_orders_with_price, df_final_stock, on="Barkod", how="left")
-        df_merged[stok_net_avail_col] = df_merged[stok_net_avail_col].fillna(0)
+        # 6. Adım: Siparişe konsolide edilmiş barkod stoğunu bağlayalım
+        df_final = pd.merge(df_orders_with_price, df_barcode_stock_sum, on="Barkod", how="left")
+        df_final[stok_net_avail_col] = df_final[stok_net_avail_col].fillna(0)
         
-        # Karşılama hesaplama mantığı
-        df_merged['Karşılanan Adet'] = np.minimum(df_merged['Sipariş Miktarı'], df_merged[stok_net_avail_col])
-        df_merged['Fiyat'] = df_merged['Fiyat'].fillna(0)
+        # --- HESAPLAMALAR ---
+        df_final['Karşılanan Adet'] = np.minimum(df_final['Sipariş Miktarı'], df_final[stok_net_avail_col])
+        df_final['Fiyat'] = df_final['Fiyat'].fillna(0)
         
-        # NIV Tutar Hesaplamaları
-        df_merged['Toplam Talep Edilen NIV'] = df_merged['Sipariş Miktarı'] * df_merged['Fiyat']
-        df_merged['Karşılanan NIV'] = df_merged['Karşılanan Adet'] * df_merged['Fiyat']
-        df_merged['Kayıp (Karşılanamayan) NIV'] = (df_merged['Sipariş Miktarı'] - df_merged['Karşılanan Adet']) * df_merged['Fiyat']
-        df_merged['Fill Rate %'] = (df_merged['Karşılanan Adet'] / df_merged['Sipariş Miktarı'] * 100).fillna(0)
+        df_final['Toplam Talep Edilen NIV'] = df_final['Sipariş Miktarı'] * df_final['Fiyat']
+        df_final['Karşılanan NIV'] = df_final['Karşılanan Adet'] * df_final['Fiyat']
+        df_final['Kayıp (Karşılanamayan) NIV'] = (df_final['Sipariş Miktarı'] - df_final['Karşılanan Adet']) * df_final['Fiyat']
+        df_final['Fill Rate %'] = (df_final['Karşılanan Adet'] / df_final['Sipariş Miktarı'] * 100).fillna(0)
 
-        # --- YENİ: ARAMA ÖZELLİKLİ FİLTRELEME ALANI ---
+        # --- YAZARAK ARAMA ÖZELLİKLİ FİLTRELEME ALANI ---
         st.sidebar.markdown("---")
         st.sidebar.header("🔍 Yazarak Arayın & Filtreleyin")
         
-        # 1. Arama Özellikli Müşteri Filtresi (Multiselect)
-        tum_musteriler = sorted(df_merged['Müşteri Adı'].dropna().unique().tolist())
+        tum_musteriler = sorted(df_final['Müşteri Adı'].dropna().unique().tolist())
         secilen_musteriler = st.sidebar.multiselect(
             "🏢 Müşteri Adı Yazın / Seçin", 
             options=tum_musteriler,
             placeholder="Müşteri ismi yazın..."
         )
         
-        # 2. Arama Özellikli Barkod Filtresi (Multiselect)
-        tum_barkodlar = sorted(df_merged['Barkod'].dropna().unique().tolist())
+        tum_barkodlar = sorted(df_final['Barkod'].dropna().unique().tolist())
         secilen_barkodlar = st.sidebar.multiselect(
             "🏷 Barkod Yazın / Seçin", 
             options=tum_barkodlar,
             placeholder="Barkod yazın..."
         )
         
-        # Filtreleri tabloya uygulama
-        df_filtered = df_merged.copy()
-        
-        # Eğer müşteri seçildiyse filtrele (boş bırakılırsa hepsi listelenir)
+        # Filtreleme uygulaması
+        df_filtered = df_final.copy()
         if len(secilen_musteriler) > 0:
             df_filtered = df_filtered[df_filtered['Müşteri Adı'].isin(secilen_musteriler)]
-            
-        # Eğer barkod seçildiyse filtrele (boş bırakılırsa hepsi listelenir)
         if len(secilen_barkodlar) > 0:
             df_filtered = df_filtered[df_filtered['Barkod'].isin(secilen_barkodlar)]
 
-        # --- KPI Kartları (Filtrelenmiş Veriye Göre) ---
+        # --- KPI KARTLARI ---
         total_requested_niv = df_filtered['Toplam Talep Edilen NIV'].sum()
         total_allocated_niv = df_filtered['Karşılanan NIV'].sum()
         total_lost_niv = df_filtered['Kayıp (Karşılanamayan) NIV'].sum()
@@ -136,10 +136,10 @@ if orders_file and catalog_file and stock_file and prices_file:
         col2.metric("Karşılanabilir (Allocated) NIV", f"₺{total_allocated_niv:,.2f}", delta=f"{overall_fill_rate:.1f}% Fill Rate")
         col3.metric("Kayıp (Stoksuzluk) NIV", f"₺{total_lost_niv:,.2f}", delta_color="inverse")
         
-        # Sonuç Tablosu
+        # --- TABLO GÖSTERİMİ ---
         st.markdown("---")
         st.subheader("📋 Karşılama Detay Tablosu")
-        # Dinamik kolon kontrolü
+        
         display_cols = []
         possible_cols = {
             'Müşteri Adı': 'Müşteri Adı',
@@ -159,26 +159,4 @@ if orders_file and catalog_file and stock_file and prices_file:
         st.dataframe(df_filtered[display_cols].style.format({
             'Fiyat': '₺{:,.2f}' if 'Fiyat' in df_filtered.columns else '{}',
             'Toplam Talep Edilen NIV': '₺{:,.2f}' if 'Toplam Talep Edilen NIV' in df_filtered.columns else '{}',
-            'Karşılanan NIV': '₺{:,.2f}' if 'Karşılanan NIV' in df_filtered.columns else '{}'
-        }))
-    else:
-        st.warning("⚠ Yüklenen Excel dosyalarındaki kolon isimlerini kontrol edin:")
-        # Detaylı Hata Gösterimi
-        if not orders_ok:
-            st.error(f"❌ Sipariş Dosyasında Sorun Var!")
-            st.write(f"Aranan Kolonlar: **'{siparis_barkod_col}'** ve **'Sipariş Miktarı'**")
-            st.write(f"Dosyanızdaki Mevcut Kolonlar: {list(df_orders.columns)}")
-        if not catalog_ok:
-            st.error(f"❌ Katalog Dosyasında Sorun Var!")
-            st.write(f"Aranan Kolonlar: **'{katalog_material_col}'** ve **'{katalog_ean_col}'**")
-            st.write(f"Dosyanızdaki Mevcut Kolonlar: {list(df_catalog.columns)}")
-        if not stock_ok:
-            st.error(f"❌ Stok Dosyasında Sorun Var!")
-            st.write(f"Aranan Kolonlar: **'{stok_material_col}'** ve **'{stok_net_avail_col}'**")
-            st.write(f"Dosyanızdaki Mevcut Kolonlar: {list(df_stock.columns)}")
-        if not prices_ok:
-            st.error(f"❌ Fiyat Dosyasında Sorun Var!")
-            st.write(f"Aranan Kolonlar: **'{fiyat_barkod_col}'** ve **'{fiyat_deger_col}'**")
-            st.write(f"Dosyanızdaki Mevcut Kolonlar: {list(df_prices_raw.columns)}")
-else:
-    st.info("💡 Lütfen sol menüden 'Sipariş', 'Katalog', 'Stok' ve 'Fiyat' excel dosyalarını yükleyin. Analiz otomatik olarak başlayacaktır.")
+            'Karşılanan NIV': '₺{:,.2f}' if 'Karşılanan NIV' in df_filtered.columns else
