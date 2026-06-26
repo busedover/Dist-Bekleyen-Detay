@@ -50,15 +50,12 @@ if orders_file and catalog_file and stock_file and prices_file:
     
     if catalog_ok and stock_ok and orders_ok and prices_ok:
         
-        # --- GELİŞMİŞ VE GARANTİLİ BARKOD TEMİZLEME FONKSİYONU ---
+        # --- BARKOD TEMİZLEME MOTORU ---
         def gelismis_barkod_temizle(seri):
-            # 1. Her bir veriyi metne çevir ve boşlukları at
             s_str = seri.astype(str).str.strip()
-            
-            # 2. Başta ve sonda kalan tüm nokta (.) işaretlerini sil (Örn: .360052. -> 360052)
+            # Baş ve sondaki noktaları at
             s_str = s_str.apply(lambda x: re.sub(r'^\.+|\.+$', '', x))
-            
-            # 3. Bilimsel gösterim varsa (3.60052e+12 vb.) düzelt
+            # Bilimsel gösterim ayarı
             def e_notation_duzelt(val):
                 if 'e' in val.lower():
                     try:
@@ -67,63 +64,77 @@ if orders_file and catalog_file and stock_file and prices_file:
                         pass
                 return val
             s_str = s_str.apply(e_notation_duzelt)
-            
-            # 4. Eğer sonunda .0 kalmışsa onu da sil (Örn: 3600520.0 -> 3600520)
             s_str = s_str.apply(lambda x: x.split('.')[0] if '.' in x else x)
-            
-            # 5. Sadece sayıları koru
+            # Sadece sayıları koru
             s_str = s_str.apply(lambda x: re.sub(r'\D', '', x))
-            
+            return s_str
+
+        # --- MALZEME TEMİZLEME MOTORU ---
+        def malzeme_kodunu_temizle(seri):
+            # Sayısal değerlere zorlamadan önce string temizliği
+            s_str = seri.astype(str).str.strip()
+            s_str = s_str.apply(lambda x: x.split('.')[0] if '.' in x else x)
+            # Başındaki sıfırları ve harf dışı boşlukları temizle
+            s_str = s_str.str.lstrip('0')
             return s_str
 
         # --- VERİ TEMİZLEME VE FORMAT STANDARTLAŞTIRMA ---
-        # 1. Sipariş Barkod Temizliği
         df_orders[siparis_barkod_col] = gelismis_barkod_temizle(df_orders[siparis_barkod_col])
         
-        # 2. Katalog Temizliği (Material sayıya, EAN noktadan arındırılmış stringe)
-        df_catalog[katalog_material_col] = pd.to_numeric(df_catalog[katalog_material_col], errors='coerce')
+        # Malzemeleri metin tabanlı temizleyelim (Integer zorlaması eşleşmeyi bozmasın diye string olarak eşitleyeceğiz)
+        df_catalog[katalog_material_col] = malzeme_kodunu_temizle(df_catalog[katalog_material_col])
         df_catalog[katalog_ean_col] = gelismis_barkod_temizle(df_catalog[katalog_ean_col])
         
-        # 3. Stok Temizliği (Material ve Net avail. sayısal dönüşümü)
-        df_stock[stok_material_col] = pd.to_numeric(df_stock[stok_material_col], errors='coerce')
+        df_stock[stok_material_col] = malzeme_kodunu_temizle(df_stock[stok_material_col])
         df_stock[stok_net_avail_col] = pd.to_numeric(df_stock[stok_net_avail_col], errors='coerce').fillna(0)
         
-        # Boş/Geçersiz malzeme kodlarını temizle
-        df_catalog_clean_temp = df_catalog.dropna(subset=[katalog_material_col])
-        df_stock_clean_temp = df_stock.dropna(subset=[stok_material_col])
-        
-        # Material sütunlarını tam sayı tipine zorlayalım
-        df_catalog_clean_temp[katalog_material_col] = df_catalog_clean_temp[katalog_material_col].astype(int)
-        df_stock_clean_temp[stok_material_col] = df_stock_clean_temp[stok_material_col].astype(int)
-        
-        # 4. Fiyat Listesi Temizliği
         df_prices_raw[fiyat_barkod_col] = gelismis_barkod_temizle(df_prices_raw[fiyat_barkod_col])
         df_prices = df_prices_raw[[fiyat_barkod_col, fiyat_deger_col]].dropna().drop_duplicates(subset=[fiyat_barkod_col])
         df_prices.rename(columns={fiyat_barkod_col: "Barkod", fiyat_deger_col: "Fiyat"}, inplace=True)
 
-        # --- ASIL CPD KÖPRÜ MANTIK ZİNCİRİ ---
-        # 1. Adım: Stok dosyasındaki malzemelerin toplam stoklarını gruplayarak alalım
-        df_stock_grouped = df_stock_clean_temp.groupby(stok_material_col)[stok_net_avail_col].sum().reset_index()
+        # --- CANLI ADIM ADIM TEŞHİS PANELİ ---
+        st.info("🔍 **Eşleşme Teşhis Paneli** (Adım Adım Hata Tespiti)")
         
-        # 2. Adım: Katalogdan sadece Material ve EAN (Barkod) sütunlarını çekelim
-        df_cat_bridge = df_catalog_clean_temp[[katalog_material_col, katalog_ean_col]].drop_duplicates()
+        t1, t2, t3, t4 = st.columns(4)
+        t1.metric("Katalogdaki Satır Sayısı", len(df_catalog))
+        t2.metric("Stoktaki Satır Sayısı", len(df_stock))
         
-        # 3. Adım: Katalog köprüsüyle Stokları "Material" üzerinden birleştirelim
+        # Ortak malzeme kodu sayısı
+        katalog_malzemeler = set(df_catalog[katalog_material_col].dropna().unique())
+        stok_malzemeler = set(df_stock[stok_material_col].dropna().unique())
+        ortak_malzemeler = katalog_malzemeler.intersection(stok_malzemeler)
+        
+        t3.metric("Ortak Malzeme Kodu", len(ortak_malzemeler))
+        
+        # 1. Aşama: Stok Gruplama
+        df_stock_grouped = df_stock.groupby(stok_material_col)[stok_net_avail_col].sum().reset_index()
+        
+        # 2. Aşama: Katalog Köprü Temizliği
+        df_cat_bridge = df_catalog[[katalog_material_col, katalog_ean_col]].dropna().drop_duplicates()
+        
+        # 3. Aşama: Katalog ve Stok Birleştirme
         df_merged_stock = pd.merge(df_cat_bridge, df_stock_grouped, on=katalog_material_col, how="inner")
         
-        # 4. Adım: Aynı barkoda (EAN Cod-UM) karşılık gelen tüm malzeme stoklarını TOPLAYALIM
+        t4.metric("Eşleşen Stok Satırı", len(df_merged_stock))
+
+        # Hata Detayı Verme
+        if len(ortak_malzemeler) == 0:
+            st.error("❌ TEŞHİS: Katalog ve Stok dosyalarındaki Material (Malzeme) kodları hiçbir şekilde uyuşmuyor!")
+            st.write("Katalogdaki Örnek Malzeme Kodları:", list(katalog_malzemeler)[:5])
+            st.write("Stoktaki Örnek Malzeme Kodları:", list(stok_malzemeler)[:5])
+        elif len(df_merged_stock) == 0:
+            st.warning("⚠ TEŞHİS: Ortak malzemeler var ancak birleştirme aşamasında eleniyorlar. Lütfen formatları inceleyin.")
+
+        # --- ASIL CPD KÖPRÜ MANTIK ZİNCİRİ ---
+        # Aynı barkoda (EAN Cod-UM) karşılık gelen tüm malzeme stoklarını topluyoruz
         df_barcode_stock_sum = df_merged_stock.groupby(katalog_ean_col)[stok_net_avail_col].sum().reset_index()
-        
-        # Kolon ismini standartlaştırarak siparişe hazır hale getirelim
         df_barcode_stock_sum.rename(columns={katalog_ean_col: "Barkod"}, inplace=True)
 
         # --- SİPARİŞ BİRLEŞTİRME VE FİYATLANDIRMA ---
-        # 5. Adım: Siparişe Fiyatları Barkod üzerinden bağlayalım
         if "Fiyat" in df_orders.columns:
             df_orders = df_orders.drop(columns=["Fiyat"])
         df_orders_with_price = pd.merge(df_orders, df_prices, on="Barkod", how="left")
         
-        # 6. Adım: Siparişe konsolide edilmiş barkod stoğunu bağlayalım
         df_final = pd.merge(df_orders_with_price, df_barcode_stock_sum, on="Barkod", how="left")
         df_final[stok_net_avail_col] = df_final[stok_net_avail_col].fillna(0)
         
