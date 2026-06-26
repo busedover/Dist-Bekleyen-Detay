@@ -48,6 +48,16 @@ if orders_file and catalog_file and stock_file and prices_file:
     prices_ok = fiyat_barkod_col in df_prices_raw.columns and fiyat_deger_col in df_prices_raw.columns
     
     if catalog_ok and stock_ok and orders_ok and prices_ok:
+        # --- VERİ TİPİ TEMİZLEME VE UYUMLAŞTIRMA (Kritik Aşama) ---
+        # Barkod kolonlarını string (yazı) formatına getiriyoruz ve boşlukları siliyoruz
+        df_orders[siparis_barkod_col] = df_orders[siparis_barkod_col].astype(str).str.strip().str.split('.').str[0]
+        df_catalog[katalog_ean_col] = df_catalog[katalog_ean_col].astype(str).str.strip().str.split('.').str[0]
+        df_prices_raw[fiyat_barkod_col] = df_prices_raw[fiyat_barkod_col].astype(str).str.strip().str.split('.').str[0]
+        
+        # Malzeme (Material) kolonlarını temizleme (Örn: başında sıfır olan sayıları eşitlemek için)
+        df_catalog[katalog_material_col] = df_catalog[katalog_material_col].astype(str).str.strip().str.lstrip('0')
+        df_stock[stok_material_col] = df_stock[stok_material_col].astype(str).str.strip().str.lstrip('0')
+        
         # Fiyat listesini temizleyelim ve "Barkod" - "Fiyat" olarak standartlaştıralım
         df_prices = df_prices_raw[[fiyat_barkod_col, fiyat_deger_col]].dropna().drop_duplicates(subset=[fiyat_barkod_col])
         df_prices.rename(columns={fiyat_barkod_col: "Barkod", fiyat_deger_col: "Fiyat"}, inplace=True)
@@ -98,7 +108,7 @@ if orders_file and catalog_file and stock_file and prices_file:
         # Sonuç Tablosu
         st.markdown("---")
         st.subheader("📋 Karşılama Detay Tablosu")
-        # Dinamik kolon kontrolü (Tabloda hata vermemesi için sadece var olan kolonları gösterelim)
+        # Dinamik kolon kontrolü
         display_cols = []
         possible_cols = {
             'Müşteri Adı': 'Müşteri Adı',
@@ -122,23 +132,19 @@ if orders_file and catalog_file and stock_file and prices_file:
         }))
     else:
         st.warning("⚠ Dosyalar yüklendi fakat aşağıdaki kolon isimlerinde uyuşmazlık var:")
-        
         # Detaylı Hata Gösterimi
         if not orders_ok:
             st.error(f"❌ Sipariş Dosyasında Sorun Var!")
             st.write(f"Aranan Kolonlar: **'{siparis_barkod_col}'** ve **'Sipariş Miktarı'**")
             st.write(f"Dosyanızdaki Mevcut Kolonlar: {list(df_orders.columns)}")
-            
         if not catalog_ok:
             st.error(f"❌ Katalog Dosyasında Sorun Var!")
             st.write(f"Aranan Kolonlar: **'{katalog_material_col}'** ve **'{katalog_ean_col}'**")
             st.write(f"Dosyanızdaki Mevcut Kolonlar: {list(df_catalog.columns)}")
-            
         if not stock_ok:
             st.error(f"❌ Stok Dosyasında Sorun Var!")
             st.write(f"Aranan Kolonlar: **'{stok_material_col}'** ve **'{stok_net_avail_col}'**")
             st.write(f"Dosyanızdaki Mevcut Kolonlar: {list(df_stock.columns)}")
-            
         if not prices_ok:
             st.error(f"❌ Fiyat Dosyasında Sorun Var!")
             st.write(f"Aranan Kolonlar: **'{fiyat_barkod_col}'** ve **'{fiyat_deger_col}'**")
