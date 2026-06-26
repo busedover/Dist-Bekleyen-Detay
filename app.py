@@ -96,7 +96,7 @@ if orders_file and catalog_file and stock_file and prices_file:
         df_barcode_stock_sum = df_merged_stock.groupby(katalog_ean_col)[stok_net_avail_col].sum().reset_index()
         df_barcode_stock_sum.rename(columns={katalog_ean_col: "Barkod"}, inplace=True)
 
-        # --- S SİPARİŞ BİRLEŞTİRME VE FİYATLANDIRMA ---
+        # --- SİPARİŞ BİRLEŞTİRME VE FİYATLANDIRMA ---
         if "Fiyat" in df_orders.columns:
             df_orders = df_orders.drop(columns=["Fiyat"])
         df_orders_with_price = pd.merge(df_orders, df_prices, on="Barkod", how="left")
@@ -125,9 +125,9 @@ if orders_file and catalog_file and stock_file and prices_file:
         
         df_final['Fiyat'] = df_final['Fiyat'].fillna(0)
         
-        # --- NIV HESAPLAMALARI ---
+        # --- NIV HESAPLAMALARI (Stoklu NIV olarak güncellendi) ---
         df_final['Toplam Talep Edilen NIV'] = df_final['Sipariş Miktarı'] * df_final['Fiyat']
-        df_final['Karşılanabilecek NIV'] = df_final['Karşılanabilecek Adet_Internal'] * df_final['Fiyat']
+        df_final['Stoklu NIV'] = df_final['Karşılanabilecek Adet_Internal'] * df_final['Fiyat']
         df_final['Kayıp (Karşılanamayan) NIV'] = (df_final['Sipariş Miktarı'] - df_final['Karşılanabilecek Adet_Internal']) * df_final['Fiyat']
         df_final['Fill Rate %'] = (df_final['Karşılanabilecek Adet_Internal'] / df_final['Sipariş Miktarı'] * 100).fillna(0)
 
@@ -158,13 +158,13 @@ if orders_file and catalog_file and stock_file and prices_file:
 
         # --- KPI KARTLARI ---
         total_requested_niv = df_filtered['Toplam Talep Edilen NIV'].sum()
-        total_allocated_niv = df_filtered['Karşılanabilecek NIV'].sum()
+        total_allocated_niv = df_filtered['Stoklu NIV'].sum() # Güncellendi
         total_lost_niv = df_filtered['Kayıp (Karşılanamayan) NIV'].sum()
         overall_fill_rate = (total_allocated_niv / total_requested_niv * 100) if total_requested_niv > 0 else 0
         
         col1, col2, col3 = st.columns(3)
         col1.metric("Toplam Bekleyen Sipariş NIV", f"₺{total_requested_niv:,.2f}")
-        col2.metric("Karşılanabilir (Allocated) NIV", f"₺{total_allocated_niv:,.2f}", delta=f"{overall_fill_rate:.1f}% Fill Rate")
+        col2.metric("Stoklu NIV", f"₺{total_allocated_niv:,.2f}", delta=f"{overall_fill_rate:.1f}% Fill Rate") # Güncellendi
         col3.metric("Kayıp (Stoksuzluk) NIV", f"₺{total_lost_niv:,.2f}", delta_color="inverse")
         
         # --- TABLO GÖSTERİMİ ---
@@ -182,7 +182,7 @@ if orders_file and catalog_file and stock_file and prices_file:
             'Stok Durumu': 'Stok Durumu',
             'Fiyat': 'Fiyat',
             'Toplam Talep Edilen NIV': 'Toplam Talep Edilen NIV',
-            'Karşılanabilecek NIV': 'Karşılanabilecek NIV'
+            'Stoklu NIV': 'Stoklu NIV' # Güncellendi
         }
         for col_key, col_val in possible_cols.items():
             if col_val in df_filtered.columns:
@@ -193,12 +193,11 @@ if orders_file and catalog_file and stock_file and prices_file:
             color = 'green' if val == "Stoklu" else 'red'
             return f'color: {color}; font-weight: bold;'
 
-        # Kopyalamayı kolaylaştırmak için st.dataframe'in en gelişmiş parametrelerini ekliyoruz
         st.dataframe(
             df_filtered[display_cols].style.format({
                 'Fiyat': '₺{:,.2f}' if 'Fiyat' in df_filtered.columns else '{}',
                 'Toplam Talep Edilen NIV': '₺{:,.2f}' if 'Toplam Talep Edilen NIV' in df_filtered.columns else '{}',
-                'Karşılanabilecek NIV': '₺{:,.2f}' if 'Karşılanabilecek NIV' in df_filtered.columns else '{}'
+                'Stoklu NIV': '₺{:,.2f}' if 'Stoklu NIV' in df_filtered.columns else '{}' # Güncellendi
             }).map(color_stok_durumu, subset=['Stok Durumu'] if 'Stok Durumu' in df_filtered.columns else []),
             use_container_width=True
         )
