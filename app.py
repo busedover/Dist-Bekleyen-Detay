@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import re
 
 # Sayfa ayarları
 st.set_page_config(page_title="CPD Order & Stock Allocator Dashboard", layout="wide")
@@ -48,14 +49,18 @@ if orders_file and catalog_file and stock_file and prices_file:
     prices_ok = fiyat_barkod_col in df_prices_raw.columns and fiyat_deger_col in df_prices_raw.columns
     
     if catalog_ok and stock_ok and orders_ok and prices_ok:
-        # --- VERİ TEMİZLEME VE SAF SAYISAL FORMAT DÖNÜŞÜMÜ ---
+        # --- BARKODLARDAN NOKTA (.) VE BOŞLUKLARI TEMİZLEME FONKSİYONU ---
+        def barkod_temizle(seri):
+            # String tipine çevir, boşlukları sil, başındaki/sonundaki ve içindeki tüm noktaları temizle
+            return seri.astype(str).str.strip().str.replace('.', '', regex=False).str.split('e').str[0]
+
+        # --- VERİ TEMİZLEME VE FORMAT STANDARTLAŞTIRMA ---
         # 1. Sipariş Barkod Temizliği
-        df_orders[siparis_barkod_col] = df_orders[siparis_barkod_col].astype(str).str.strip().str.split('.').str[0]
+        df_orders[siparis_barkod_col] = barkod_temizle(df_orders[siparis_barkod_col])
         
-        # 2. Katalog Temizliği (Material ve EAN)
-        # Material kodlarını sayısal değere zorlayarak başlarındaki sıfırlardan arındırıyoruz
+        # 2. Katalog Temizliği (Material sayıya, EAN tamamen noktadan arındırılmış stringe)
         df_catalog[katalog_material_col] = pd.to_numeric(df_catalog[katalog_material_col], errors='coerce')
-        df_catalog[katalog_ean_col] = df_catalog[katalog_ean_col].astype(str).str.strip().str.split('.').str[0]
+        df_catalog[katalog_ean_col] = barkod_temizle(df_catalog[katalog_ean_col])
         
         # 3. Stok Temizliği (Material ve Net avail. sayısal dönüşümü)
         df_stock[stok_material_col] = pd.to_numeric(df_stock[stok_material_col], errors='coerce')
@@ -65,12 +70,12 @@ if orders_file and catalog_file and stock_file and prices_file:
         df_catalog_clean_temp = df_catalog.dropna(subset=[katalog_material_col])
         df_stock_clean_temp = df_stock.dropna(subset=[stok_material_col])
         
-        # Material sütunlarını integer (tam sayı) tipine zorlayalım (Böylece Örn: 12345.0 ile 12345 tam eşleşir)
+        # Material sütunlarını tam sayı tipine zorlayalım
         df_catalog_clean_temp[katalog_material_col] = df_catalog_clean_temp[katalog_material_col].astype(int)
         df_stock_clean_temp[stok_material_col] = df_stock_clean_temp[stok_material_col].astype(int)
         
         # 4. Fiyat Listesi Temizliği
-        df_prices_raw[fiyat_barkod_col] = df_prices_raw[fiyat_barkod_col].astype(str).str.strip().str.split('.').str[0]
+        df_prices_raw[fiyat_barkod_col] = barkod_temizle(df_prices_raw[fiyat_barkod_col])
         df_prices = df_prices_raw[[fiyat_barkod_col, fiyat_deger_col]].dropna().drop_duplicates(subset=[fiyat_barkod_col])
         df_prices.rename(columns={fiyat_barkod_col: "Barkod", fiyat_deger_col: "Fiyat"}, inplace=True)
 
