@@ -10,7 +10,8 @@ st.title("📦 CPD Sipariş Karşılama ve NIV Dashboard")
 st.subheader("Distribütör Bekleyen Sipariş, Katalog ve Stok Durumu Analizi")
 
 # --- ARKA PLANDAKİ SİZİN YÜKLEDİĞİNİZ FİYAT LİSTESİNİ OKUMA ---
-fiyat_dosya_adi = "fiyat_listesi.xlsx"
+# Dosya ismini yüklediğiniz "fiyatlar.xlsx" olarak güncelledik
+fiyat_dosya_adi = "fiyatlar.xlsx"
 
 @st.cache_data
 def fiyat_listesini_yukle():
@@ -52,7 +53,7 @@ if orders_file and catalog_file and stock_file and df_prices is not None:
     katalog_material_col = "Material"
     katalog_ean_col = "EAN Cod-UM"
     stok_material_col = "Material"
-    stok_net_avail_col = "Net avail." # Tam belirttiğiniz sütun ismi
+    stok_net_avail_col = "Net avail." # Tam belirttiğiniz 'Net avail.' sütun ismi
     
     # Kolon Kontrolleri
     catalog_ok = katalog_material_col in df_catalog.columns and katalog_ean_col in df_catalog.columns
@@ -121,4 +122,3 @@ if orders_file and catalog_file and stock_file and df_prices is not None:
         if not stock_ok:
             st.write(f"- Stok dosyasında '{stok_material_col}' ve '{stok_net_avail_col}' kolonları olmalı.")
 else:
-    st.info("💡 Lütfen sol menüden 'Sipariş', 'Katalog' ve 'Stok' excel dosyalarını yükleyin. Fiyat eşleştirmeleri arka planda otomatik tamamlanacaktır.")
