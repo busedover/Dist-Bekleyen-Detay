@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import os
 
 # Sayfa ayarları
 st.set_page_config(page_title="CPD Order & Stock Allocator Dashboard", layout="wide")
@@ -9,32 +8,13 @@ st.set_page_config(page_title="CPD Order & Stock Allocator Dashboard", layout="w
 st.title("📦 CPD Sipariş Karşılama ve NIV Dashboard")
 st.subheader("Distribütör Bekleyen Sipariş, Katalog ve Stok Durumu Analizi")
 
-# --- ARKA PLANDAKİ FİYAT LİSTESİNİ OKUMA ---
-fiyat_dosya_adi = "fiyat_listesi.xlsx"
-
-@st.cache_data
-def fiyat_listesini_yukle():
-    if os.path.exists(fiyat_dosya_adi):
-        df_fiyat = pd.read_excel(fiyat_dosya_adi)
-        df_fiyat.columns = df_fiyat.columns.str.strip()
-        if "Barkod" in df_fiyat.columns and "Fiyat" in df_fiyat.columns:
-            return df_fiyat[["Barkod", "Fiyat"]].drop_duplicates(subset=["Barkod"])
-    return None
-
-df_prices = fiyat_listesini_yukle()
-
-if df_prices is not None:
-    st.sidebar.success("✅ Güncel Fiyat Listesi sistemden otomatik yüklendi!")
-else:
-    st.sidebar.error("❌ 'fiyat_listesi.xlsx' dosyası GitHub deposunda bulunamadı!")
-
 # --- DOSYA YÜKLEME ALANI ---
 st.sidebar.header("📂 Excel Dosyalarını Yükleyin")
 orders_file = st.sidebar.file_uploader("1. Bekleyen Siparişler Excel'i", type=["xlsx", "xls"])
-catalog_file = st.sidebar.file_uploader("2. Katalog Raporu Excel'i (Köprü)", type=["xlsx", "xls"])
+catalog_file = st.sidebar.file_uploader("2. Katalog Raporu Excel'i (Köprü & Fiyat)", type=["xlsx", "xls"])
 stock_file = st.sidebar.file_uploader("3. Güncel Stok Excel'i", type=["xlsx", "xls"])
 
-if orders_file and catalog_file and stock_file and df_prices is not None:
+if orders_file and catalog_file and stock_file:
     # Verileri oku
     df_orders = pd.read_excel(orders_file)
     df_catalog = pd.read_excel(catalog_file)
@@ -51,11 +31,14 @@ if orders_file and catalog_file and stock_file and df_prices is not None:
     siparis_barkod_col = "Barkod"
     katalog_material_col = "Material"
     katalog_ean_col = "EAN Cod-UM"
+    katalog_price_col = "Catal.price"
     stok_material_col = "Material"
     stok_net_avail_col = "Net Available"
     
     # Kolon Kontrolleri
-    catalog_ok = katalog_material_col in df_catalog.columns and katalog_ean_col in df_catalog.columns
+    catalog_ok = (katalog_material_col in df_catalog.columns and 
+                  katalog_ean_col in df_catalog.columns and 
+                  katalog_price_col in df_catalog.columns)
     stock_ok = stok_material_col in df_stock.columns and stok_net_avail_col in df_stock.columns
     orders_ok = siparis_barkod_col in df_orders.columns and "Sipariş Miktarı" in df_orders.columns
     
@@ -63,8 +46,8 @@ if orders_file and catalog_file and stock_file and df_prices is not None:
         # 1. Stok dosyasında Malzeme bazında toplam 'Net Available' miktarını hesapla
         df_stock_grouped = df_stock.groupby(stok_material_col)[stok_net_avail_col].sum().reset_index()
         
-        # 2. Katalog dosyasından Material -> EAN (Barkod) eşleşmesini temiz bir şekilde al
-        df_cat_clean = df_catalog[[katalog_material_col, katalog_ean_col]].dropna().drop_duplicates()
+        # 2. Katalog dosyasından Material -> EAN (Barkod) -> Catal.price eşleşmesini temiz bir şekilde al
+        df_cat_clean = df_catalog[[katalog_material_col, katalog_ean_col, katalog_price_col]].dropna(subset=[katalog_ean_col]).drop_duplicates()
         
         # 3. Kataloğu Stok ile birleştirerek Barkod bazlı stok durumunu elde et
         df_barcode_stock = pd.merge(df_cat_clean, df_stock_grouped, on=katalog_material_col, how="inner")
@@ -73,12 +56,18 @@ if orders_file and catalog_file and stock_file and df_prices is not None:
         df_final_stock = df_barcode_stock.groupby(katalog_ean_col)[stok_net_avail_col].sum().reset_index()
         df_final_stock.rename(columns={katalog_ean_col: "Barkod"}, inplace=True)
         
-        # 4. Sipariş dosyasına otomatik fiyatları eşleştirme
+        # 4. Katalogdan fiyat eşleştirmesi yapmak için barkod bazlı temiz fiyat listesi oluştur
+        df_final_prices = df_cat_clean.groupby(katalog_ean_col)[katalog_price_col].mean().reset_index()
+        df_final_prices.rename(columns={katalog_ean_col: "Barkod", katalog_price_col: "Fiyat"}, inplace=True)
+        
+        # 5. Siparişte eski bir Fiyat kolonu varsa çakışmasın diye siliyoruz
         if "Fiyat" in df_orders.columns:
             df_orders = df_orders.drop(columns=["Fiyat"])
-        df_orders_with_price = pd.merge(df_orders, df_prices, on="Barkod", how="left")
+            
+        # Sipariş dosyasına otomatik fiyatları katalogdan eşleştirme
+        df_orders_with_price = pd.merge(df_orders, df_final_prices, on="Barkod", how="left")
         
-        # 5. Sipariş verilerini Barkod bazlı son stok durumu ile birleştir
+        # 6. Sipariş verilerini Barkod bazlı son stok durumu ile birleştir
         df_merged = pd.merge(df_orders_with_price, df_final_stock, on="Barkod", how="left")
         df_merged[stok_net_avail_col] = df_merged[stok_net_avail_col].fillna(0)
         
@@ -117,8 +106,8 @@ if orders_file and catalog_file and stock_file and df_prices is not None:
         if not orders_ok:
             st.write(f"- Sipariş dosyasında '{siparis_barkod_col}' ve 'Sipariş Miktarı' kolonları olmalı.")
         if not catalog_ok:
-            st.write(f"- Katalog dosyasında '{katalog_material_col}' ve '{katalog_ean_col}' kolonları olmalı.")
+            st.write(f"- Katalog dosyasında '{katalog_material_col}', '{katalog_ean_col}' ve '{katalog_price_col}' kolonları olmalı.")
         if not stock_ok:
             st.write(f"- Stok dosyasında '{stok_material_col}' ve '{stok_net_avail_col}' kolonları olmalı.")
 else:
-    st.info("💡 Lütfen sol menüden 'Sipariş', 'Katalog' ve 'Stok' excel dosyalarını yükleyin. Eşleştirmeler arka planda otomatik tamamlanacaktır.")
+    st.info("💡 Lütfen sol menüden 'Sipariş', 'Katalog' ve 'Stok' excel dosyalarını yükleyin. Fiyatlar ve stoklar arka planda otomatik eşleştirilecektir.")
