@@ -94,10 +94,31 @@ if orders_file and catalog_file and stock_file and prices_file:
         df_merged['Kayıp (Karşılanamayan) NIV'] = (df_merged['Sipariş Miktarı'] - df_merged['Karşılanan Adet']) * df_merged['Fiyat']
         df_merged['Fill Rate %'] = (df_merged['Karşılanan Adet'] / df_merged['Sipariş Miktarı'] * 100).fillna(0)
 
-        # KPI Kartları
-        total_requested_niv = df_merged['Toplam Talep Edilen NIV'].sum()
-        total_allocated_niv = df_merged['Karşılanan NIV'].sum()
-        total_lost_niv = df_merged['Kayıp (Karşılanamayan) NIV'].sum()
+        # --- YENİ: FİLTRELEME ALANI ---
+        st.sidebar.markdown("---")
+        st.sidebar.header("🔍 Veri Filtreleme")
+        
+        # 1. Müşteri Filtresi
+        musteri_listesi = ["Tümü"] + sorted(df_merged['Müşteri Adı'].dropna().unique().tolist())
+        secilen_musteri = st.sidebar.selectbox("Müşteri Seçin", musteri_listesi)
+        
+        # 2. Barkod Filtresi
+        barkod_listesi = ["Tümü"] + sorted(df_merged['Barkod'].dropna().unique().tolist())
+        secilen_barkod = st.sidebar.selectbox("Barkod Seçin", barkod_listesi)
+        
+        # Filtreleri tabloya uygulama
+        df_filtered = df_merged.copy()
+        
+        if secilen_musteri != "Tümü":
+            df_filtered = df_filtered[df_filtered['Müşteri Adı'] == secilen_musteri]
+            
+        if secilen_barkod != "Tümü":
+            df_filtered = df_filtered[df_filtered['Barkod'] == secilen_barkod]
+
+        # --- KPI Kartları (Filtrelenmiş Veriye Göre) ---
+        total_requested_niv = df_filtered['Toplam Talep Edilen NIV'].sum()
+        total_allocated_niv = df_filtered['Karşılanan NIV'].sum()
+        total_lost_niv = df_filtered['Kayıp (Karşılanamayan) NIV'].sum()
         overall_fill_rate = (total_allocated_niv / total_requested_niv * 100) if total_requested_niv > 0 else 0
         
         col1, col2, col3 = st.columns(3)
@@ -122,16 +143,16 @@ if orders_file and catalog_file and stock_file and prices_file:
             'Karşılanan NIV': 'Karşılanan NIV'
         }
         for col_key, col_val in possible_cols.items():
-            if col_val in df_merged.columns:
+            if col_val in df_filtered.columns:
                 display_cols.append(col_val)
                 
-        st.dataframe(df_merged[display_cols].style.format({
-            'Fiyat': '₺{:,.2f}' if 'Fiyat' in df_merged.columns else '{}',
-            'Toplam Talep Edilen NIV': '₺{:,.2f}' if 'Toplam Talep Edilen NIV' in df_merged.columns else '{}',
-            'Karşılanan NIV': '₺{:,.2f}' if 'Karşılanan NIV' in df_merged.columns else '{}'
+        st.dataframe(df_filtered[display_cols].style.format({
+            'Fiyat': '₺{:,.2f}' if 'Fiyat' in df_filtered.columns else '{}',
+            'Toplam Talep Edilen NIV': '₺{:,.2f}' if 'Toplam Talep Edilen NIV' in df_filtered.columns else '{}',
+            'Karşılanan NIV': '₺{:,.2f}' if 'Karşılanan NIV' in df_filtered.columns else '{}'
         }))
     else:
-        st.warning("⚠ Dosyalar yüklendi fakat aşağıdaki kolon isimlerinde uyuşmazlık var:")
+        st.warning("⚠ Yüklenen Excel dosyalarındaki kolon isimlerini kontrol edin:")
         # Detaylı Hata Gösterimi
         if not orders_ok:
             st.error(f"❌ Sipariş Dosyasında Sorun Var!")
