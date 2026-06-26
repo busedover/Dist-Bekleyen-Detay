@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import re
+from io import BytesIO
 
 # Sayfa ayarları
 st.set_page_config(page_title="CPD Order & Stock Allocator Dashboard", layout="wide")
@@ -53,9 +54,7 @@ if orders_file and catalog_file and stock_file and prices_file:
         # --- BARKOD TEMİZLEME MOTORU ---
         def gelismis_barkod_temizle(seri):
             s_str = seri.astype(str).str.strip()
-            # Baş ve sondaki noktaları at
             s_str = s_str.apply(lambda x: re.sub(r'^\.+|\.+$', '', x))
-            # Bilimsel gösterim ayarı
             def e_notation_duzelt(val):
                 if 'e' in val.lower():
                     try:
@@ -65,7 +64,6 @@ if orders_file and catalog_file and stock_file and prices_file:
                 return val
             s_str = s_str.apply(e_notation_duzelt)
             s_str = s_str.apply(lambda x: x.split('.')[0] if '.' in x else x)
-            # Sadece sayıları koru
             s_str = s_str.apply(lambda x: re.sub(r'\D', '', x))
             return s_str
 
@@ -98,7 +96,7 @@ if orders_file and catalog_file and stock_file and prices_file:
         df_barcode_stock_sum = df_merged_stock.groupby(katalog_ean_col)[stok_net_avail_col].sum().reset_index()
         df_barcode_stock_sum.rename(columns={katalog_ean_col: "Barkod"}, inplace=True)
 
-        # --- SİPARİŞ BİRLEŞTİRME VE FİYATLANDIRMA ---
+        # --- S SİPARİŞ BİRLEŞTİRME VE FİYATLANDIRMA ---
         if "Fiyat" in df_orders.columns:
             df_orders = df_orders.drop(columns=["Fiyat"])
         df_orders_with_price = pd.merge(df_orders, df_prices, on="Barkod", how="left")
@@ -107,28 +105,20 @@ if orders_file and catalog_file and stock_file and prices_file:
         df_final = pd.merge(df_orders_with_price, df_barcode_stock_sum, on="Barkod", how="left")
         df_final[stok_net_avail_col] = df_final[stok_net_avail_col].fillna(0)
         
-        # --- YENİ ALGORİTMA: %70 EŞİK DEĞERLİ DURUM KONTROLÜ ---
-        # 1. Her bir barkoda ait tüm bekleyen sipariş miktarlarının toplamını hesaplayalım
+        # --- ALGORİTMA: %70 EŞİK DEĞERLİ DURUM KONTROLÜ ---
         df_final['Toplam Barkod Talebi'] = df_final.groupby('Barkod')['Sipariş Miktarı'].transform('sum')
         
-        # 2. %70 Eşik Değeri Kuralını Çalıştırma:
-        # Eğer Toplam Sipariş Miktarı, Net Stoğun %70'inden fazlaysa o ürün "Stoksuz" kabul edilir.
         def yuzde_yetmis_kuralı(row):
             toplam_talep = row['Toplam Barkod Talebi']
             mevcut_stok = row[stok_net_avail_col]
             siparis_miktari = row['Sipariş Miktarı']
-            
-            # Eşik Değeri Limit: Stoğun %70'i
             limit_stok = mevcut_stok * 0.70
             
-            # Eğer sipariş toplamı stoğun %70'inden fazlaysa direkt STOKSUZ sayıyoruz
             if toplam_talep > limit_stok or mevcut_stok == 0:
                 return "Stoksuz", 0
             else:
-                # Stoğun %70'inden az ise STOKLU sayılır ve sipariş tamamen karşılanabilir
                 return "Stoklu", siparis_miktari
                 
-        # Algoritmayı uygula
         durum_ve_adet = df_final.apply(yuzde_yetmis_kuralı, axis=1)
         df_final['Stok Durumu'] = [x[0] for x in durum_ve_adet]
         df_final['Karşılanabilecek Adet_Internal'] = [x[1] for x in durum_ve_adet]
@@ -180,6 +170,7 @@ if orders_file and catalog_file and stock_file and prices_file:
         # --- TABLO GÖSTERİMİ ---
         st.markdown("---")
         st.subheader("📋 Karşılama Detay Tablosu")
+        st.caption("💡 İpucu: Herhangi bir hücredeki barkod veya metni çift tıklayarak doğrudan kopyalayabilirsiniz (Ctrl+C).")
         
         display_cols = []
         possible_cols = {
@@ -202,13 +193,36 @@ if orders_file and catalog_file and stock_file and prices_file:
             color = 'green' if val == "Stoklu" else 'red'
             return f'color: {color}; font-weight: bold;'
 
+        # Kopyalamayı kolaylaştırmak için st.dataframe'in en gelişmiş parametrelerini ekliyoruz
         st.dataframe(
             df_filtered[display_cols].style.format({
                 'Fiyat': '₺{:,.2f}' if 'Fiyat' in df_filtered.columns else '{}',
                 'Toplam Talep Edilen NIV': '₺{:,.2f}' if 'Toplam Talep Edilen NIV' in df_filtered.columns else '{}',
                 'Karşılanabilecek NIV': '₺{:,.2f}' if 'Karşılanabilecek NIV' in df_filtered.columns else '{}'
-            }).map(color_stok_durumu, subset=['Stok Durumu'] if 'Stok Durumu' in df_filtered.columns else [])
+            }).map(color_stok_durumu, subset=['Stok Durumu'] if 'Stok Durumu' in df_filtered.columns else []),
+            use_container_width=True
         )
+
+        # --- EXCEL DOSYASI OLARAK İNDİRME ALANI ---
+        st.markdown("### 📥 Raporu Dışarı Aktar")
+        
+        def to_excel(df_export):
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df_export.to_excel(writer, index=False, sheet_name='Sipariş Karşılama Raporu')
+            processed_data = output.getvalue()
+            return processed_data
+
+        df_export_data = df_filtered[display_cols].copy()
+        
+        excel_data = to_excel(df_export_data)
+        st.download_button(
+            label="📊 Sonuçları Excel Olarak İndir (.xlsx)",
+            data=excel_data,
+            file_name="cpd_siparis_karsilama_raporu.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        
     else:
         st.warning("⚠ Yüklenen Excel dosyalarındaki kolon isimlerini kontrol edin:")
         if not orders_ok:
