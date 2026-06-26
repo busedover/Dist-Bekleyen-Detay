@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import os
 
 # Sayfa ayarları
 st.set_page_config(page_title="CPD Order & Stock Allocator Dashboard", layout="wide")
@@ -9,41 +8,25 @@ st.set_page_config(page_title="CPD Order & Stock Allocator Dashboard", layout="w
 st.title("📦 CPD Sipariş Karşılama ve NIV Dashboard")
 st.subheader("Distribütör Bekleyen Sipariş, Katalog ve Stok Durumu Analizi")
 
-# --- ARKA PLANDAKİ SİZİN YÜKLEDİĞİNİZ FİYAT LİSTESİNİ OKUMA ---
-fiyat_dosya_adi = "fiyatlar.xlsx"
-
-@st.cache_data
-def fiyat_listesini_yukle():
-    if os.path.exists(fiyat_dosya_adi):
-        df_fiyat = pd.read_excel(fiyat_dosya_adi, engine="openpyxl")
-        df_fiyat.columns = df_fiyat.columns.str.strip()
-        if "Barkod" in df_fiyat.columns and "Fiyat" in df_fiyat.columns:
-            return df_fiyat[["Barkod", "Fiyat"]].drop_duplicates(subset=["Barkod"])
-    return None
-
-df_prices = fiyat_listesini_yukle()
-
-if df_prices is not None:
-    st.sidebar.success("✅ Güncel Fiyat Listesi sistemden otomatik yüklendi!")
-else:
-    st.sidebar.error(f"❌ '{fiyat_dosya_adi}' dosyası GitHub deposunda bulunamadı! Lütfen bu dosyayı GitHub'a yükleyin.")
-
-# --- DOSYA YÜKLEME ALANI (Kullanıcının yükleyeceği 3 dosya) ---
+# --- DOSYA YÜKLEME ALANI (Kullanıcının yükleyeceği 4 dosya) ---
 st.sidebar.header("📂 Excel Dosyalarını Yükleyin")
 orders_file = st.sidebar.file_uploader("1. Bekleyen Siparişler Excel'i", type=["xlsx", "xls"])
 catalog_file = st.sidebar.file_uploader("2. Katalog Raporu Excel'i (Köprü)", type=["xlsx", "xls"])
 stock_file = st.sidebar.file_uploader("3. Güncel Stok Excel'i", type=["xlsx", "xls"])
+prices_file = st.sidebar.file_uploader("4. Güncel Fiyat Listesi Excel'i (Fiyatlar)", type=["xlsx", "xls"])
 
-if orders_file and catalog_file and stock_file and df_prices is not None:
+if orders_file and catalog_file and stock_file and prices_file:
     # Verileri oku
     df_orders = pd.read_excel(orders_file, engine="openpyxl")
     df_catalog = pd.read_excel(catalog_file, engine="openpyxl")
     df_stock = pd.read_excel(stock_file, engine="openpyxl")
+    df_prices_raw = pd.read_excel(prices_file, engine="openpyxl")
     
     # Kolon isimlerindeki boşlukları temizleme
     df_orders.columns = df_orders.columns.str.strip()
     df_catalog.columns = df_catalog.columns.str.strip()
     df_stock.columns = df_stock.columns.str.strip()
+    df_prices_raw.columns = df_prices_raw.columns.str.strip()
     
     st.success("✅ Tüm Excel dosyaları başarıyla yüklendi!")
     
@@ -52,14 +35,18 @@ if orders_file and catalog_file and stock_file and df_prices is not None:
     katalog_material_col = "Material"
     katalog_ean_col = "EAN Cod-UM"
     stok_material_col = "Material"
-    stok_net_avail_col = "Net avail." # Tam belirttiğiniz 'Net avail.' sütun ismi
+    stok_net_avail_col = "Net avail." # Sizin belirttiğiniz 'Net avail.' sütun ismi
     
     # Kolon Kontrolleri
     catalog_ok = katalog_material_col in df_catalog.columns and katalog_ean_col in df_catalog.columns
     stock_ok = stok_material_col in df_stock.columns and stok_net_avail_col in df_stock.columns
     orders_ok = siparis_barkod_col in df_orders.columns and "Sipariş Miktarı" in df_orders.columns
+    prices_ok = "Barkod" in df_prices_raw.columns and "Fiyat" in df_prices_raw.columns
     
-    if catalog_ok and stock_ok and orders_ok:
+    if catalog_ok and stock_ok and orders_ok and prices_ok:
+        # Fiyat listesini benzersiz yap
+        df_prices = df_prices_raw[["Barkod", "Fiyat"]].drop_duplicates(subset=["Barkod"])
+
         # 1. Stok dosyasında Malzeme bazında toplam 'Net avail.' miktarını hesapla
         df_stock_grouped = df_stock.groupby(stok_material_col)[stok_net_avail_col].sum().reset_index()
         
@@ -120,5 +107,7 @@ if orders_file and catalog_file and stock_file and df_prices is not None:
             st.write(f"- Katalog dosyasında '{katalog_material_col}' ve '{katalog_ean_col}' kolonları olmalı.")
         if not stock_ok:
             st.write(f"- Stok dosyasında '{stok_material_col}' ve '{stok_net_avail_col}' kolonları olmalı.")
+        if not prices_ok:
+            st.write("- Fiyat dosyasında 'Barkod' ve 'Fiyat' kolonları olmalı.")
 else:
-    st.info("💡 Lütfen sol menüden 'Sipariş', 'Katalog' ve 'Stok' excel dosyalarını yükleyin. Fiyat eşleştirmeleri arka planda otomatik tamamlanacaktır.")
+    st.info("💡 Lütfen sol menüden 'Sipariş', 'Katalog', 'Stok' ve 'Fiyat' excel dosyalarını yükleyin. Analiz otomatik olarak başlayacaktır.")
