@@ -6,9 +6,9 @@ import numpy as np
 st.set_page_config(page_title="CPD Order & Stock Allocator Dashboard", layout="wide")
 
 st.title("📦 CPD Sipariş Karşılama ve NIV Dashboard")
-st.subheader("Distribütör Bekleyen Sipariş, Katalog ve Stok Durumu Analizi")
+st.subheader("Distribütör Bekleyen Sipariş, Katalog, Stok ve Fiyat Analizi")
 
-# --- DOSYA YÜKLEME ALANI (Kullanıcının yükleyeceği 4 dosya) ---
+# --- DOSYA YÜKLEME ALANI (4 Dosya) ---
 st.sidebar.header("📂 Excel Dosyalarını Yükleyin")
 orders_file = st.sidebar.file_uploader("1. Bekleyen Siparişler Excel'i", type=["xlsx", "xls"])
 catalog_file = st.sidebar.file_uploader("2. Katalog Raporu Excel'i (Köprü)", type=["xlsx", "xls"])
@@ -35,17 +35,22 @@ if orders_file and catalog_file and stock_file and prices_file:
     katalog_material_col = "Material"
     katalog_ean_col = "EAN Cod-UM"
     stok_material_col = "Material"
-    stok_net_avail_col = "Net avail." # Sizin belirttiğiniz 'Net avail.' sütun ismi
+    stok_net_avail_col = "Net avail."
+    
+    # Fiyat dosyasındaki tam sütun isimleriniz
+    fiyat_barkod_col = "EAN Cod-UM"
+    fiyat_deger_col = "Catal.price"
     
     # Kolon Kontrolleri
     catalog_ok = katalog_material_col in df_catalog.columns and katalog_ean_col in df_catalog.columns
     stock_ok = stok_material_col in df_stock.columns and stok_net_avail_col in df_stock.columns
     orders_ok = siparis_barkod_col in df_orders.columns and "Sipariş Miktarı" in df_orders.columns
-    prices_ok = "Barkod" in df_prices_raw.columns and "Fiyat" in df_prices_raw.columns
+    prices_ok = fiyat_barkod_col in df_prices_raw.columns and fiyat_deger_col in df_prices_raw.columns
     
     if catalog_ok and stock_ok and orders_ok and prices_ok:
-        # Fiyat listesini benzersiz yap
-        df_prices = df_prices_raw[["Barkod", "Fiyat"]].drop_duplicates(subset=["Barkod"])
+        # Fiyat listesini temizleyelim ve "Barkod" - "Fiyat" olarak standartlaştıralım
+        df_prices = df_prices_raw[[fiyat_barkod_col, fiyat_deger_col]].dropna().drop_duplicates(subset=[fiyat_barkod_col])
+        df_prices.rename(columns={fiyat_barkod_col: "Barkod", fiyat_deger_col: "Fiyat"}, inplace=True)
 
         # 1. Stok dosyasında Malzeme bazında toplam 'Net avail.' miktarını hesapla
         df_stock_grouped = df_stock.groupby(stok_material_col)[stok_net_avail_col].sum().reset_index()
@@ -79,35 +84,4 @@ if orders_file and catalog_file and stock_file and prices_file:
         df_merged['Kayıp (Karşılanamayan) NIV'] = (df_merged['Sipariş Miktarı'] - df_merged['Karşılanan Adet']) * df_merged['Fiyat']
         df_merged['Fill Rate %'] = (df_merged['Karşılanan Adet'] / df_merged['Sipariş Miktarı'] * 100).fillna(0)
 
-        # KPI Kartları
-        total_requested_niv = df_merged['Toplam Talep Edilen NIV'].sum()
-        total_allocated_niv = df_merged['Karşılanan NIV'].sum()
-        total_lost_niv = df_merged['Kayıp (Karşılanamayan) NIV'].sum()
-        overall_fill_rate = (total_allocated_niv / total_requested_niv * 100) if total_requested_niv > 0 else 0
-        
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Toplam Bekleyen Sipariş NIV", f"₺{total_requested_niv:,.2f}")
-        col2.metric("Karşılanabilir (Allocated) NIV", f"₺{total_allocated_niv:,.2f}", delta=f"{overall_fill_rate:.1f}% Fill Rate")
-        col3.metric("Kayıp (Stoksuzluk) NIV", f"₺{total_lost_niv:,.2f}", delta_color="inverse")
-        
-        # Sonuç Tablosu
-        st.markdown("---")
-        st.subheader("📋 Karşılama Detay Tablosu")
-        display_cols = ['Müşteri Adı', 'Barkod', 'Ürün Adı', 'Sipariş Miktarı', stok_net_avail_col, 'Karşılanan Adet', 'Fiyat', 'Toplam Talep Edilen NIV', 'Karşılanan NIV']
-        st.dataframe(df_merged[display_cols].style.format({
-            'Fiyat': '₺{:,.2f}',
-            'Toplam Talep Edilen NIV': '₺{:,.2f}',
-            'Karşılanan NIV': '₺{:,.2f}'
-        }))
-    else:
-        st.warning("⚠ Yüklenen Excel dosyalarındaki kolon isimlerini kontrol edin:")
-        if not orders_ok:
-            st.write(f"- Sipariş dosyasında '{siparis_barkod_col}' ve 'Sipariş Miktarı' kolonları olmalı.")
-        if not catalog_ok:
-            st.write(f"- Katalog dosyasında '{katalog_material_col}' ve '{katalog_ean_col}' kolonları olmalı.")
-        if not stock_ok:
-            st.write(f"- Stok dosyasında '{stok_material_col}' ve '{stok_net_avail_col}' kolonları olmalı.")
-        if not prices_ok:
-            st.write("- Fiyat dosyasında 'Barkod' ve 'Fiyat' kolonları olmalı.")
-else:
-    st.info("💡 Lütfen sol menüden 'Sipariş', 'Katalog', 'Stok' ve 'Fiyat' excel dosyalarını yükleyin. Analiz otomatik olarak başlayacaktır.")
+        # KPI Kartla
