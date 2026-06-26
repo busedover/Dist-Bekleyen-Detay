@@ -48,17 +48,26 @@ if orders_file and catalog_file and stock_file and prices_file:
     prices_ok = fiyat_barkod_col in df_prices_raw.columns and fiyat_deger_col in df_prices_raw.columns
     
     if catalog_ok and stock_ok and orders_ok and prices_ok:
-        # --- VERİ TEMİZLEME VE FORMAT STANDARTLAŞTIRMA ---
+        # --- VERİ TEMİZLEME VE SAF SAYISAL FORMAT DÖNÜŞÜMÜ ---
         # 1. Sipariş Barkod Temizliği
         df_orders[siparis_barkod_col] = df_orders[siparis_barkod_col].astype(str).str.strip().str.split('.').str[0]
         
         # 2. Katalog Temizliği (Material ve EAN)
-        df_catalog[katalog_material_col] = df_catalog[katalog_material_col].astype(str).str.strip().str.lstrip('0')
+        # Material kodlarını sayısal değere zorlayarak başlarındaki sıfırlardan arındırıyoruz
+        df_catalog[katalog_material_col] = pd.to_numeric(df_catalog[katalog_material_col], errors='coerce')
         df_catalog[katalog_ean_col] = df_catalog[katalog_ean_col].astype(str).str.strip().str.split('.').str[0]
         
         # 3. Stok Temizliği (Material ve Net avail. sayısal dönüşümü)
-        df_stock[stok_material_col] = df_stock[stok_material_col].astype(str).str.strip().str.lstrip('0')
+        df_stock[stok_material_col] = pd.to_numeric(df_stock[stok_material_col], errors='coerce')
         df_stock[stok_net_avail_col] = pd.to_numeric(df_stock[stok_net_avail_col], errors='coerce').fillna(0)
+        
+        # Boş/Geçersiz malzeme kodlarını temizle
+        df_catalog_clean_temp = df_catalog.dropna(subset=[katalog_material_col])
+        df_stock_clean_temp = df_stock.dropna(subset=[stok_material_col])
+        
+        # Material sütunlarını integer (tam sayı) tipine zorlayalım (Böylece Örn: 12345.0 ile 12345 tam eşleşir)
+        df_catalog_clean_temp[katalog_material_col] = df_catalog_clean_temp[katalog_material_col].astype(int)
+        df_stock_clean_temp[stok_material_col] = df_stock_clean_temp[stok_material_col].astype(int)
         
         # 4. Fiyat Listesi Temizliği
         df_prices_raw[fiyat_barkod_col] = df_prices_raw[fiyat_barkod_col].astype(str).str.strip().str.split('.').str[0]
@@ -67,10 +76,10 @@ if orders_file and catalog_file and stock_file and prices_file:
 
         # --- ASIL CPD KÖPRÜ MANTIK ZİNCİRİ ---
         # 1. Adım: Stok dosyasındaki malzemelerin toplam stoklarını gruplayarak alalım
-        df_stock_grouped = df_stock.groupby(stok_material_col)[stok_net_avail_col].sum().reset_index()
+        df_stock_grouped = df_stock_clean_temp.groupby(stok_material_col)[stok_net_avail_col].sum().reset_index()
         
         # 2. Adım: Katalogdan sadece Material ve EAN (Barkod) sütunlarını çekelim
-        df_cat_bridge = df_catalog[[katalog_material_col, katalog_ean_col]].dropna().drop_duplicates()
+        df_cat_bridge = df_catalog_clean_temp[[katalog_material_col, katalog_ean_col]].drop_duplicates()
         
         # 3. Adım: Katalog köprüsüyle Stokları "Material" üzerinden birleştirelim
         df_merged_stock = pd.merge(df_cat_bridge, df_stock_grouped, on=katalog_material_col, how="inner")
@@ -156,7 +165,6 @@ if orders_file and catalog_file and stock_file and prices_file:
             if col_val in df_filtered.columns:
                 display_cols.append(col_val)
                 
-        # Tablo stil formatlamasını pürüzsüzce kapatıyoruz
         st.dataframe(df_filtered[display_cols].style.format({
             'Fiyat': '₺{:,.2f}' if 'Fiyat' in df_filtered.columns else '{}',
             'Toplam Talep Edilen NIV': '₺{:,.2f}' if 'Toplam Talep Edilen NIV' in df_filtered.columns else '{}',
