@@ -142,4 +142,35 @@ if orders_file and catalog_file and stock_file and prices_file:
         
         display_cols = []
         possible_cols = {
-            'Müşteri Adı': 'Müşteri
+            'Müşteri Adı': 'Müşteri Adı',
+            'Barkod': 'Barkod',
+            'Ürün Adı': 'Ürün Adı',
+            'Sipariş Miktarı': 'Sipariş Miktarı',
+            stok_net_avail_col: stok_net_avail_col,
+            'Karşılanan Adet': 'Karşılanan Adet',
+            'Fiyat': 'Fiyat',
+            'Toplam Talep Edilen NIV': 'Toplam Talep Edilen NIV',
+            'Karşılanan NIV': 'Karşılanan NIV'
+        }
+        for col_key, col_val in possible_cols.items():
+            if col_val in df_filtered.columns:
+                display_cols.append(col_val)
+                
+        # Tablo stil formatlamasını pürüzsüzce kapatıyoruz
+        st.dataframe(df_filtered[display_cols].style.format({
+            'Fiyat': '₺{:,.2f}' if 'Fiyat' in df_filtered.columns else '{}',
+            'Toplam Talep Edilen NIV': '₺{:,.2f}' if 'Toplam Talep Edilen NIV' in df_filtered.columns else '{}',
+            'Karşılanan NIV': '₺{:,.2f}' if 'Karşılanan NIV' in df_filtered.columns else '{}'
+        }))
+    else:
+        st.warning("⚠ Yüklenen Excel dosyalarındaki kolon isimlerini kontrol edin:")
+        if not orders_ok:
+            st.error(f"❌ Sipariş Dosyasında Sorun Var! Aranan: '{siparis_barkod_col}' ve 'Sipariş Miktarı'")
+        if not catalog_ok:
+            st.error(f"❌ Katalog Dosyasında Sorun Var! Aranan: '{katalog_material_col}' ve '{katalog_ean_col}'")
+        if not stock_ok:
+            st.error(f"❌ Stok Dosyasında Sorun Var! Aranan: '{stok_material_col}' ve '{stok_net_avail_col}'")
+        if not prices_ok:
+            st.error(f"❌ Fiyat Dosyasında Sorun Var! Aranan: '{fiyat_barkod_col}' ve '{fiyat_deger_col}'")
+else:
+    st.info("💡 Lütfen sol menüden 'Sipariş', 'Katalog', 'Stok' ve 'Fiyat' excel dosyalarını yükleyin. Eşleştirmeler otomatik tamamlanacaktır.")
