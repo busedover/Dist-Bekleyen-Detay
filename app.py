@@ -84,4 +84,64 @@ if orders_file and catalog_file and stock_file and prices_file:
         df_merged['Kayıp (Karşılanamayan) NIV'] = (df_merged['Sipariş Miktarı'] - df_merged['Karşılanan Adet']) * df_merged['Fiyat']
         df_merged['Fill Rate %'] = (df_merged['Karşılanan Adet'] / df_merged['Sipariş Miktarı'] * 100).fillna(0)
 
-        # KPI Kartla
+        # KPI Kartları
+        total_requested_niv = df_merged['Toplam Talep Edilen NIV'].sum()
+        total_allocated_niv = df_merged['Karşılanan NIV'].sum()
+        total_lost_niv = df_merged['Kayıp (Karşılanamayan) NIV'].sum()
+        overall_fill_rate = (total_allocated_niv / total_requested_niv * 100) if total_requested_niv > 0 else 0
+        
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Toplam Bekleyen Sipariş NIV", f"₺{total_requested_niv:,.2f}")
+        col2.metric("Karşılanabilir (Allocated) NIV", f"₺{total_allocated_niv:,.2f}", delta=f"{overall_fill_rate:.1f}% Fill Rate")
+        col3.metric("Kayıp (Stoksuzluk) NIV", f"₺{total_lost_niv:,.2f}", delta_color="inverse")
+        
+        # Sonuç Tablosu
+        st.markdown("---")
+        st.subheader("📋 Karşılama Detay Tablosu")
+        # Dinamik kolon kontrolü (Tabloda hata vermemesi için sadece var olan kolonları gösterelim)
+        display_cols = []
+        possible_cols = {
+            'Müşteri Adı': 'Müşteri Adı',
+            'Barkod': 'Barkod',
+            'Ürün Adı': 'Ürün Adı',
+            'Sipariş Miktarı': 'Sipariş Miktarı',
+            stok_net_avail_col: stok_net_avail_col,
+            'Karşılanan Adet': 'Karşılanan Adet',
+            'Fiyat': 'Fiyat',
+            'Toplam Talep Edilen NIV': 'Toplam Talep Edilen NIV',
+            'Karşılanan NIV': 'Karşılanan NIV'
+        }
+        for col_key, col_val in possible_cols.items():
+            if col_val in df_merged.columns:
+                display_cols.append(col_val)
+                
+        st.dataframe(df_merged[display_cols].style.format({
+            'Fiyat': '₺{:,.2f}' if 'Fiyat' in df_merged.columns else '{}',
+            'Toplam Talep Edilen NIV': '₺{:,.2f}' if 'Toplam Talep Edilen NIV' in df_merged.columns else '{}',
+            'Karşılanan NIV': '₺{:,.2f}' if 'Karşılanan NIV' in df_merged.columns else '{}'
+        }))
+    else:
+        st.warning("⚠ Dosyalar yüklendi fakat aşağıdaki kolon isimlerinde uyuşmazlık var:")
+        
+        # Detaylı Hata Gösterimi
+        if not orders_ok:
+            st.error(f"❌ Sipariş Dosyasında Sorun Var!")
+            st.write(f"Aranan Kolonlar: **'{siparis_barkod_col}'** ve **'Sipariş Miktarı'**")
+            st.write(f"Dosyanızdaki Mevcut Kolonlar: {list(df_orders.columns)}")
+            
+        if not catalog_ok:
+            st.error(f"❌ Katalog Dosyasında Sorun Var!")
+            st.write(f"Aranan Kolonlar: **'{katalog_material_col}'** ve **'{katalog_ean_col}'**")
+            st.write(f"Dosyanızdaki Mevcut Kolonlar: {list(df_catalog.columns)}")
+            
+        if not stock_ok:
+            st.error(f"❌ Stok Dosyasında Sorun Var!")
+            st.write(f"Aranan Kolonlar: **'{stok_material_col}'** ve **'{stok_net_avail_col}'**")
+            st.write(f"Dosyanızdaki Mevcut Kolonlar: {list(df_stock.columns)}")
+            
+        if not prices_ok:
+            st.error(f"❌ Fiyat Dosyasında Sorun Var!")
+            st.write(f"Aranan Kolonlar: **'{fiyat_barkod_col}'** ve **'{fiyat_deger_col}'**")
+            st.write(f"Dosyanızdaki Mevcut Kolonlar: {list(df_prices_raw.columns)}")
+else:
+    st.info("💡 Lütfen sol menüden 'Sipariş', 'Katalog', 'Stok' ve 'Fiyat' excel dosyalarını yükleyin. Analiz otomatik olarak başlayacaktır.")
