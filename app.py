@@ -49,18 +49,40 @@ if orders_file and catalog_file and stock_file and prices_file:
     prices_ok = fiyat_barkod_col in df_prices_raw.columns and fiyat_deger_col in df_prices_raw.columns
     
     if catalog_ok and stock_ok and orders_ok and prices_ok:
-        # --- BARKODLARDAN NOKTA (.) VE BOŞLUKLARI TEMİZLEME FONKSİYONU ---
-        def barkod_temizle(seri):
-            # String tipine çevir, boşlukları sil, başındaki/sonundaki ve içindeki tüm noktaları temizle
-            return seri.astype(str).str.strip().str.replace('.', '', regex=False).str.split('e').str[0]
+        
+        # --- GELİŞMİŞ VE GARANTİLİ BARKOD TEMİZLEME FONKSİYONU ---
+        def gelismis_barkod_temizle(seri):
+            # 1. Her bir veriyi metne çevir ve boşlukları at
+            s_str = seri.astype(str).str.strip()
+            
+            # 2. Başta ve sonda kalan tüm nokta (.) işaretlerini sil (Örn: .360052. -> 360052)
+            s_str = s_str.apply(lambda x: re.sub(r'^\.+|\.+$', '', x))
+            
+            # 3. Bilimsel gösterim varsa (3.60052e+12 vb.) düzelt
+            def e_notation_duzelt(val):
+                if 'e' in val.lower():
+                    try:
+                        return str(int(float(val)))
+                    except:
+                        pass
+                return val
+            s_str = s_str.apply(e_notation_duzelt)
+            
+            # 4. Eğer sonunda .0 kalmışsa onu da sil (Örn: 3600520.0 -> 3600520)
+            s_str = s_str.apply(lambda x: x.split('.')[0] if '.' in x else x)
+            
+            # 5. Sadece sayıları koru
+            s_str = s_str.apply(lambda x: re.sub(r'\D', '', x))
+            
+            return s_str
 
         # --- VERİ TEMİZLEME VE FORMAT STANDARTLAŞTIRMA ---
         # 1. Sipariş Barkod Temizliği
-        df_orders[siparis_barkod_col] = barkod_temizle(df_orders[siparis_barkod_col])
+        df_orders[siparis_barkod_col] = gelismis_barkod_temizle(df_orders[siparis_barkod_col])
         
-        # 2. Katalog Temizliği (Material sayıya, EAN tamamen noktadan arındırılmış stringe)
+        # 2. Katalog Temizliği (Material sayıya, EAN noktadan arındırılmış stringe)
         df_catalog[katalog_material_col] = pd.to_numeric(df_catalog[katalog_material_col], errors='coerce')
-        df_catalog[katalog_ean_col] = barkod_temizle(df_catalog[katalog_ean_col])
+        df_catalog[katalog_ean_col] = gelismis_barkod_temizle(df_catalog[katalog_ean_col])
         
         # 3. Stok Temizliği (Material ve Net avail. sayısal dönüşümü)
         df_stock[stok_material_col] = pd.to_numeric(df_stock[stok_material_col], errors='coerce')
@@ -75,7 +97,7 @@ if orders_file and catalog_file and stock_file and prices_file:
         df_stock_clean_temp[stok_material_col] = df_stock_clean_temp[stok_material_col].astype(int)
         
         # 4. Fiyat Listesi Temizliği
-        df_prices_raw[fiyat_barkod_col] = barkod_temizle(df_prices_raw[fiyat_barkod_col])
+        df_prices_raw[fiyat_barkod_col] = gelismis_barkod_temizle(df_prices_raw[fiyat_barkod_col])
         df_prices = df_prices_raw[[fiyat_barkod_col, fiyat_deger_col]].dropna().drop_duplicates(subset=[fiyat_barkod_col])
         df_prices.rename(columns={fiyat_barkod_col: "Barkod", fiyat_deger_col: "Fiyat"}, inplace=True)
 
